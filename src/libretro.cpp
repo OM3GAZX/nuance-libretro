@@ -80,13 +80,6 @@ static retro_hw_render_callback hw_render;
 static bool gl_initialized = false;
 static bool game_loaded = false;
 
-static GLuint hw_texture = 0;
-static GLuint hw_program = 0;
-static GLint hw_pos_loc = -1;
-static GLint hw_uv_loc = -1;
-static GLint hw_tex_loc = -1;
-static bool hw_renderer_ready = false;
-
 // Audio buffer
 #define AUDIO_BUFFER_SIZE 4096
 static int16_t audio_buffer[AUDIO_BUFFER_SIZE];
@@ -145,159 +138,6 @@ static uint16 GetInputButtons()
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2))    buttons |= CTRLR_BUTTON_C_DOWN;
     if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2))    buttons |= CTRLR_BUTTON_C_RIGHT;
     return buttons;
-}
-
-static bool CompileShader(GLuint shader, const char* source, const char* label)
-{
-    glShaderSource(shader, 1, &source, nullptr);
-    glCompileShader(shader);
-
-    GLint compiled = GL_FALSE;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-    if (!compiled) {
-        GLint len = 0;
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
-        std::vector<char> log(len > 0 ? len : 256);
-        glGetShaderInfoLog(shader, len, nullptr, log.data());
-        log_printf("libretro: %s shader compile failed: %s\n", label, log.data());
-        return false;
-    }
-    return true;
-}
-
-static bool InitSoftwareFramebufferRenderer()
-{
-    if (hw_renderer_ready)
-        return true;
-
-    static const char* vertex_shader_source =
-        "#ifdef GL_ES\n"
-        "precision mediump float;\n"
-        "#endif\n"
-        "attribute vec2 aPos;\n"
-        "attribute vec2 aTexCoord;\n"
-        "varying vec2 vTexCoord;\n"
-        "void main() { vTexCoord = aTexCoord; gl_Position = vec4(aPos, 0.0, 1.0); }\n";
-
-    static const char* fragment_shader_source =
-        "#ifdef GL_ES\n"
-        "precision mediump float;\n"
-        "#endif\n"
-        "varying vec2 vTexCoord;\n"
-        "uniform sampler2D uTex;\n"
-        "void main() { gl_FragColor = texture2D(uTex, vTexCoord); }\n";
-
-    const GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-    const GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-    if (!vertex_shader || !fragment_shader) {
-        log_printf("libretro: failed to create shader objects\n");
-        return false;
-    }
-
-    if (!CompileShader(vertex_shader, vertex_shader_source, "vertex") ||
-        !CompileShader(fragment_shader, fragment_shader_source, "fragment")) {
-        glDeleteShader(vertex_shader);
-        glDeleteShader(fragment_shader);
-        return false;
-    }
-
-    hw_program = glCreateProgram();
-    if (!hw_program) {
-        glDeleteShader(vertex_shader);
-        glDeleteShader(fragment_shader);
-        return false;
-    }
-
-    glAttachShader(hw_program, vertex_shader);
-    glAttachShader(hw_program, fragment_shader);
-    glLinkProgram(hw_program);
-
-    GLint linked = GL_FALSE;
-    glGetProgramiv(hw_program, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        GLint len = 0;
-        glGetProgramiv(hw_program, GL_INFO_LOG_LENGTH, &len);
-        std::vector<char> log(len > 0 ? len : 256);
-        glGetProgramInfoLog(hw_program, len, nullptr, log.data());
-        log_printf("libretro: shader program link failed: %s\n", log.data());
-        glDeleteProgram(hw_program);
-        hw_program = 0;
-        glDeleteShader(vertex_shader);
-        glDeleteShader(fragment_shader);
-        return false;
-    }
-
-    glDeleteShader(vertex_shader);
-    glDeleteShader(fragment_shader);
-
-    hw_pos_loc = glGetAttribLocation(hw_program, "aPos");
-    hw_uv_loc = glGetAttribLocation(hw_program, "aTexCoord");
-    hw_tex_loc = glGetUniformLocation(hw_program, "uTex");
-
-    glGenTextures(1, &hw_texture);
-    glBindTexture(GL_TEXTURE_2D, hw_texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FB_WIDTH, FB_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-
-    hw_renderer_ready = true;
-    return true;
-}
-
-static void RenderSoftwareFramebufferToHW(const uint32_t* src, int width, int height)
-{
-    if (!src || !gl_initialized || !hw_renderer_ready)
-        return;
-
-    if (!InitSoftwareFramebufferRenderer())
-        return;
-
-    std::vector<uint8_t> rgba(width * height * 4);
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            const uint32_t pixel = src[y * width + x];
-            const size_t idx = (size_t)(y * width + x) * 4;
-            rgba[idx + 0] = static_cast<uint8_t>((pixel >> 16) & 0xFF);
-            rgba[idx + 1] = static_cast<uint8_t>((pixel >> 8) & 0xFF);
-            rgba[idx + 2] = static_cast<uint8_t>(pixel & 0xFF);
-            rgba[idx + 3] = static_cast<uint8_t>((pixel >> 24) & 0xFF);
-        }
-    }
-
-    glBindTexture(GL_TEXTURE_2D, hw_texture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-
-    const GLfloat quad_vertices[] = {
-        -1.0f, -1.0f,
-        -1.0f,  1.0f,
-         1.0f,  1.0f,
-         1.0f, -1.0f,
-    };
-    const GLfloat quad_uv[] = {
-        0.0f, 0.0f,
-        0.0f, 1.0f,
-        1.0f, 1.0f,
-        1.0f, 0.0f,
-    };
-
-    glUseProgram(hw_program);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, hw_texture);
-    glUniform1i(hw_tex_loc, 0);
-
-    glViewport(0, 0, width, height);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
-
-    glVertexAttribPointer(hw_pos_loc, 2, GL_FLOAT, GL_FALSE, 0, quad_vertices);
-    glEnableVertexAttribArray(hw_pos_loc);
-    glVertexAttribPointer(hw_uv_loc, 2, GL_FLOAT, GL_FALSE, 0, quad_uv);
-    glEnableVertexAttribArray(hw_uv_loc);
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-    glDisableVertexAttribArray(hw_pos_loc);
-    glDisableVertexAttribArray(hw_uv_loc);
 }
 
 static void context_reset(void)
@@ -764,17 +604,7 @@ void retro_run(void)
     }
 
     RenderVideoToSoftwareBuffer(framebuffer, FB_WIDTH, FB_HEIGHT);
-
-    if (gl_initialized) {
-        glBindFramebuffer(GL_FRAMEBUFFER, hw_render.get_current_framebuffer());
-        glViewport(0, 0, FB_WIDTH, FB_HEIGHT);
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        RenderSoftwareFramebufferToHW(framebuffer, FB_WIDTH, FB_HEIGHT);
-        video_cb(RETRO_HW_FRAME_BUFFER_VALID, FB_WIDTH, FB_HEIGHT, 0);
-    } else {
-        video_cb(framebuffer, FB_WIDTH, FB_HEIGHT, FB_WIDTH * 4);
-    }
+    video_cb(framebuffer, FB_WIDTH, FB_HEIGHT, FB_WIDTH * 4);
 
     // Audio: drain the host audio ring. DrainAudioRing emits native-endian s16
     // (the ring holds little-endian samples; swapped only on big-endian hosts),
