@@ -108,17 +108,12 @@ void InitializeColorSpaceTables()
 
 static uint32_t ConvertYCrCbToRGBX(uint8_t Y, uint8_t CR, uint8_t CB)
 {
-  const float y = ((float)Y - 16.0f) / 219.0f;
-  const float cb = ((float)CB - 128.0f) / 224.0f;
-  const float cr = ((float)CR - 128.0f) / 224.0f;
-
-  const float r = std::clamp(y + 1.402f * cr, 0.0f, 1.0f);
-  const float g = std::clamp(y - 0.34413f * cb - 0.714136f * cr, 0.0f, 1.0f);
-  const float b = std::clamp(y + 1.772f * cb, 0.0f, 1.0f);
-
-  return (((uint32_t)(r * 255.0f)) << 16) |
-         (((uint32_t)(g * 255.0f)) << 8) |
-         (uint32_t)(b * 255.0f);
+  // Match the byte layout used by the existing Nuon video pipeline so the
+  // software framebuffer can be passed to RetroArch as a standard XRGB8888
+  // buffer without introducing an extra shader-dependent conversion step.
+  return (((uint32_t)(CB & 0xFF)) << 16) |
+         (((uint32_t)(CR & 0xFF)) << 8) |
+         (uint32_t)(Y & 0xFF);
 }
 
 void RenderVideoToSoftwareBuffer(uint32_t* dst, int width, int height)
