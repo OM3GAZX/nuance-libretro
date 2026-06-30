@@ -201,6 +201,9 @@ void retro_set_environment(retro_environment_t cb)
     bool no_game = false;
     cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_game);
 
+    enum retro_pixel_format pixel_format = RETRO_PIXEL_FORMAT_XRGB8888;
+    cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &pixel_format);
+
     static struct retro_input_descriptor desc[] = {
         { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP, "D-Pad Up" },
         { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN, "D-Pad Down" },
@@ -600,17 +603,12 @@ void retro_run(void)
         nuonEnv.TriggerScheduledInterrupts();
     }
 
-    // Render video
-    if (gl_initialized) {
-        glBindFramebuffer(GL_FRAMEBUFFER, hw_render.get_current_framebuffer());
-        glViewport(0, 0, FB_WIDTH, FB_HEIGHT);
-        RenderVideo(FB_WIDTH, FB_HEIGHT);
-        video_cb(RETRO_HW_FRAME_BUFFER_VALID, FB_WIDTH, FB_HEIGHT, 0);
-    } else {
-        // Software fallback - black frame
-        memset(framebuffer, 0, sizeof(framebuffer));
-        video_cb(framebuffer, FB_WIDTH, FB_HEIGHT, FB_WIDTH * 4);
-    }
+    // Render video to a software framebuffer for libretro. This avoids the
+    // fixed-function/ARB shader pipeline that is not compatible with the GLES
+    // contexts used on ARM RetroPie builds while remaining compatible with the
+    // desktop OpenGL path.
+    RenderVideoToSoftwareBuffer(framebuffer, FB_WIDTH, FB_HEIGHT);
+    video_cb(framebuffer, FB_WIDTH, FB_HEIGHT, FB_WIDTH * 4);
 
     // Audio: drain the host audio ring. DrainAudioRing emits native-endian s16
     // (the ring holds little-endian samples; swapped only on big-endian hosts),

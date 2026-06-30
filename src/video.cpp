@@ -106,6 +106,115 @@ void InitializeColorSpaceTables()
     }
 }
 
+static uint32_t ConvertYCrCbToRGBX(uint8_t Y, uint8_t CR, uint8_t CB)
+{
+  const float y = ((float)Y - 16.0f) / 219.0f;
+  const float cb = ((float)CB - 128.0f) / 224.0f;
+  const float cr = ((float)CR - 128.0f) / 224.0f;
+
+  const float r = std::clamp(y + 1.402f * cr, 0.0f, 1.0f);
+  const float g = std::clamp(y - 0.34413f * cb - 0.714136f * cr, 0.0f, 1.0f);
+  const float b = std::clamp(y + 1.772f * cb, 0.0f, 1.0f);
+
+  return 0xFF000000u |
+         (((uint32_t)(r * 255.0f)) << 16) |
+         (((uint32_t)(g * 255.0f)) << 8) |
+         (uint32_t)(b * 255.0f);
+}
+
+void RenderVideoToSoftwareBuffer(uint32_t* dst, int width, int height)
+{
+  if (!dst || width <= 0 || height <= 0)
+    return;
+
+  memset(dst, 0, (size_t)width * (size_t)height * sizeof(uint32_t));
+  if (!bCanDisplayVideo || !bMainChannelActive)
+    return;
+
+  const uint32 pixType = (structMainChannel.dmaflags >> 4) & 0x0F;
+  uint32 pixWidthShift = 2;
+  uint32 pixWidth = 4;
+
+  switch (pixType)
+  {
+    case 2:
+      pixWidthShift = 1;
+      pixWidth = 2;
+      break;
+    case 3:
+      pixWidthShift = 0;
+      pixWidth = 1;
+      break;
+    case 4:
+      pixWidthShift = 2;
+      pixWidth = 4;
+      break;
+    case 5:
+      pixWidthShift = 2;
+      pixWidth = 4;
+      break;
+    case 6:
+      pixWidthShift = 3;
+      pixWidth = 8;
+      break;
+    default:
+      pixWidthShift = 2;
+      pixWidth = 4;
+      break;
+  }
+
+  const uint8* ptrNuonFrameBuffer =
+      (const uint8*)(nuonEnv.GetPointerToSystemMemory((uint32)structMainChannel.base + (((structMainChannel.src_yoff * structMainChannel.src_width) + structMainChannel.src_xoff) << pixWidthShift)));
+
+  const uint32 maxCol = std::min<uint32>(structMainChannel.src_width, (uint32)width);
+  const uint32 maxRow = std::min<uint32>(structMainChannel.src_height, (uint32)height);
+  uint32_t* out = dst;
+
+  for (uint32 rowCount = 0; rowCount < maxRow; ++rowCount)
+  {
+    const uint8* rowPtr = ptrNuonFrameBuffer + (rowCount * structMainChannel.src_width * pixWidth);
+    for (uint32 colCount = 0; colCount < maxCol; ++colCount)
+    {
+      const uint8* pixelPtr = rowPtr + (colCount * pixWidth);
+      uint32_t pixel = 0xFF000000u;
+
+      switch (pixType)
+      {
+        case 2:
+        case 5:
+        {
+          const uint8 Y = pixelPtr[0] & 0xFC;
+          const uint8 CR = (pixelPtr[0] << 6) | ((pixelPtr[1] >> 2) & 0x38);
+          const uint8 CB = pixelPtr[1] << 3;
+          pixel = ConvertYCrCbToRGBX(Y, CR, CB);
+          break;
+        }
+        case 3:
+        {
+          const uint8* clutPtr = (const uint8*)&vdgCLUT[pixelPtr[0]];
+          const uint8 Y = clutPtr[0];
+          const uint8 CR = clutPtr[1];
+          const uint8 CB = clutPtr[2];
+          pixel = ConvertYCrCbToRGBX(Y, CR, CB);
+          break;
+        }
+        case 4:
+        case 6:
+        default:
+        {
+          const uint8 Y = pixelPtr[0];
+          const uint8 CR = pixelPtr[1];
+          const uint8 CB = pixelPtr[2];
+          pixel = ConvertYCrCbToRGBX(Y, CR, CB);
+          break;
+        }
+      }
+
+      *out++ = pixel;
+    }
+  }
+}
+
 void UpdateTextureStates()
 {
   GLint uniformLoc;

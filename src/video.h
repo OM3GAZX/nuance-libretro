@@ -105,6 +105,7 @@ void VidSetBorderColor(MPE &mpe);
 void VidSetCLUTRange(MPE &mpe);
 void InitializeColorSpaceTables();
 void RenderVideo(int width, int height);
+void RenderVideoToSoftwareBuffer(uint32_t* dst, int width, int height);
 void VideoCleanup();
 void IncrementVideoFieldCounter();
 
