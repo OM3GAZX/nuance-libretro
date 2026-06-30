@@ -353,18 +353,26 @@ bool retro_load_game(const struct retro_game_info *game)
 
     // Defer CPU init to context_reset to avoid potential issues
 
-    // Prefer desktop OpenGL on platforms that support it, but fall back to
-    // OpenGL ES when RetroArch rejects the OpenGL context request.
-    bool hw_render_ok = TrySetHardwareRenderContext(RETRO_HW_CONTEXT_OPENGL, 2, 1, "OpenGL");
-    if (!hw_render_ok) {
-        hw_render_ok = TrySetHardwareRenderContext(RETRO_HW_CONTEXT_OPENGLES3, 3, 1, "OpenGL ES 3");
-        if (!hw_render_ok) {
-            hw_render_ok = TrySetHardwareRenderContext(RETRO_HW_CONTEXT_OPENGLES2, 2, 0, "OpenGL ES 2");
-        }
-    }
+    const char* hwRenderEnv = getenv("NUANCE_ENABLE_HW_RENDER");
+    const bool enable_hw_render = hwRenderEnv && strcmp(hwRenderEnv, "1") == 0;
 
-    if (!hw_render_ok) {
-        log_printf("libretro: HW render not available, using software\n"); fflush(stderr);
+    if (enable_hw_render) {
+        // Keep the HW-context fallback available for future GL work, but the
+        // current core path uses the software video callback, so we do not ask
+        // RetroArch for a HW context unless explicitly enabled.
+        bool hw_render_ok = TrySetHardwareRenderContext(RETRO_HW_CONTEXT_OPENGL, 2, 1, "OpenGL");
+        if (!hw_render_ok) {
+            hw_render_ok = TrySetHardwareRenderContext(RETRO_HW_CONTEXT_OPENGLES3, 3, 1, "OpenGL ES 3");
+            if (!hw_render_ok) {
+                hw_render_ok = TrySetHardwareRenderContext(RETRO_HW_CONTEXT_OPENGLES2, 2, 0, "OpenGL ES 2");
+            }
+        }
+
+        if (!hw_render_ok) {
+            log_printf("libretro: HW render not available, using software\n"); fflush(stderr);
+        }
+    } else {
+        log_printf("libretro: using software framebuffer path; not requesting HW render\n"); fflush(stderr);
     }
 
     // Find game file
