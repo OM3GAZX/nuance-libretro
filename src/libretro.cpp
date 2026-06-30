@@ -324,6 +324,24 @@ void retro_reset(void)
 
 static void NuanceBench_Run(); // defined below; self-driven interpreter benchmark
 
+static bool TrySetHardwareRenderContext(retro_hw_context_type context_type, unsigned version_major, unsigned version_minor, const char* label)
+{
+    hw_render.context_type = context_type;
+    hw_render.context_reset = context_reset;
+    hw_render.context_destroy = context_destroy;
+    hw_render.depth = false;
+    hw_render.stencil = false;
+    hw_render.bottom_left_origin = true;
+    hw_render.version_major = version_major;
+    hw_render.version_minor = version_minor;
+    hw_render.cache_context = true;
+
+    log_printf("libretro: requesting %s render...\n", label); fflush(stderr);
+    const bool ok = environ_cb(RETRO_ENVIRONMENT_SET_HW_RENDER, &hw_render);
+    log_printf("libretro: %s render %s\n", label, ok ? "OK" : "not available"); fflush(stderr);
+    return ok;
+}
+
 bool retro_load_game(const struct retro_game_info *game)
 {
     if (!game || !game->path) return false;
@@ -332,22 +350,18 @@ bool retro_load_game(const struct retro_game_info *game)
 
     // Defer CPU init to context_reset to avoid potential issues
 
-    // Request OpenGL context
-    hw_render.context_type = RETRO_HW_CONTEXT_OPENGL;
-    hw_render.context_reset = context_reset;
-    hw_render.context_destroy = context_destroy;
-    hw_render.depth = false;
-    hw_render.stencil = false;
-    hw_render.bottom_left_origin = true;
-    hw_render.version_major = 2;
-    hw_render.version_minor = 1;
-    hw_render.cache_context = true;
+    // Prefer desktop OpenGL on platforms that support it, but fall back to
+    // OpenGL ES when RetroArch rejects the OpenGL context request.
+    bool hw_render_ok = TrySetHardwareRenderContext(RETRO_HW_CONTEXT_OPENGL, 2, 1, "OpenGL");
+    if (!hw_render_ok) {
+        hw_render_ok = TrySetHardwareRenderContext(RETRO_HW_CONTEXT_OPENGLES3, 3, 1, "OpenGL ES 3");
+        if (!hw_render_ok) {
+            hw_render_ok = TrySetHardwareRenderContext(RETRO_HW_CONTEXT_OPENGLES2, 2, 0, "OpenGL ES 2");
+        }
+    }
 
-    log_printf("libretro: requesting HW render...\n"); fflush(stderr);
-    if (!environ_cb(RETRO_ENVIRONMENT_SET_HW_RENDER, &hw_render)) {
+    if (!hw_render_ok) {
         log_printf("libretro: HW render not available, using software\n"); fflush(stderr);
-    } else {
-        log_printf("libretro: HW render OK\n"); fflush(stderr);
     }
 
     // Find game file
