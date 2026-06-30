@@ -1,8 +1,6 @@
 name: ARM64 libretro core
 
 on:
-  push:
-    branches: [arm-libretro-interp]
   workflow_dispatch:
 
 jobs:
