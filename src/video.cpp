@@ -128,7 +128,15 @@ void RenderVideoToSoftwareBuffer(uint32_t* dst, int width, int height)
 
   memset(dst, 0, (size_t)width * (size_t)height * sizeof(uint32_t));
   if (!bCanDisplayVideo || !bMainChannelActive)
+  {
+    static int video_state_log_count = 0;
+    if (video_state_log_count < 3) {
+      fprintf(stderr, "libretro: video render skipped: canDisplay=%d mainActive=%d width=%d height=%d\n",
+              bCanDisplayVideo, bMainChannelActive, width, height);
+      ++video_state_log_count;
+    }
     return;
+  }
 
   const uint32 pixType = (structMainChannel.dmaflags >> 4) & 0x0F;
   uint32 pixWidthShift = 2;
@@ -169,6 +177,7 @@ void RenderVideoToSoftwareBuffer(uint32_t* dst, int width, int height)
   const uint32 maxRow = std::min<uint32>(structMainChannel.src_height, (uint32)height);
   uint32_t* out = dst;
 
+  static int pixel_dump_count = 0;
   for (uint32 rowCount = 0; rowCount < maxRow; ++rowCount)
   {
     const uint8* rowPtr = ptrNuonFrameBuffer + (rowCount * structMainChannel.src_width * pixWidth);
@@ -210,6 +219,11 @@ void RenderVideoToSoftwareBuffer(uint32_t* dst, int width, int height)
       }
 
       *out++ = pixel;
+      if (pixel_dump_count < 4 && pixel != 0) {
+        fprintf(stderr, "libretro: video sample[%d]: row=%u col=%u pixType=%u pixel=0x%08x\n",
+                pixel_dump_count, rowCount, colCount, pixType, pixel);
+        ++pixel_dump_count;
+      }
     }
   }
 }
