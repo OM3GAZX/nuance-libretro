@@ -116,8 +116,7 @@ static uint32_t ConvertYCrCbToRGBX(uint8_t Y, uint8_t CR, uint8_t CB)
   const float g = std::clamp(y - 0.34413f * cb - 0.714136f * cr, 0.0f, 1.0f);
   const float b = std::clamp(y + 1.772f * cb, 0.0f, 1.0f);
 
-  return 0xFF000000u |
-         (((uint32_t)(r * 255.0f)) << 16) |
+  return (((uint32_t)(r * 255.0f)) << 16) |
          (((uint32_t)(g * 255.0f)) << 8) |
          (uint32_t)(b * 255.0f);
 }
