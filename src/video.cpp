@@ -121,6 +121,13 @@ static uint32_t ConvertYCrCbToRGBX(uint8_t Y, uint8_t CR, uint8_t CB)
          (uint32_t)(b * 255.0f);
 }
 
+static uint32_t ConvertRawBGRA32ToRGBX(const uint8_t* pixelPtr)
+{
+  return (((uint32_t)pixelPtr[2]) << 16) |
+         (((uint32_t)pixelPtr[1]) << 8) |
+         (uint32_t)pixelPtr[0];
+}
+
 void RenderVideoToSoftwareBuffer(uint32_t* dst, int width, int height)
 {
   if (!dst || width <= 0 || height <= 0)
@@ -207,6 +214,10 @@ void RenderVideoToSoftwareBuffer(uint32_t* dst, int width, int height)
           break;
         }
         case 4:
+        {
+          pixel = ConvertRawBGRA32ToRGBX(pixelPtr);
+          break;
+        }
         case 6:
         default:
         {
