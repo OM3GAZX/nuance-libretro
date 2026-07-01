@@ -95,10 +95,12 @@ static void FillSoftwareFramebuffer(const uint32_t* src_pixels, uint8_t* dst_byt
         for (int x = 0; x < width; ++x) {
             const uint32_t pixel = src_pixels[y * width + x];
             uint8_t* out = dst_bytes + ((y * width + x) * 4);
-            out[0] = static_cast<uint8_t>(pixel & 0xFF);        // B
-            out[1] = static_cast<uint8_t>((pixel >> 8) & 0xFF); // G
-            out[2] = static_cast<uint8_t>((pixel >> 16) & 0xFF); // R
-            out[3] = 0xFF;                                    // A
+            // RetroArch's software video callback expects an XRGB8888 byte stream.
+            // The 32-bit value produced by the converter is laid out as 0x00RRGGBB.
+            out[0] = static_cast<uint8_t>((pixel >> 16) & 0xFF); // R
+            out[1] = static_cast<uint8_t>((pixel >> 8) & 0xFF);  // G
+            out[2] = static_cast<uint8_t>(pixel & 0xFF);        // B
+            out[3] = 0x00;                                      // unused / X
         }
     }
 }
