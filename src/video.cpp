@@ -314,9 +314,11 @@ void UpdateTextureStates()
     glDisable(TEXTURE_TARGET);
   }
 
-  glTexParameterfv(TEXTURE_TARGET, GL_TEXTURE_BORDER_COLOR, videoTexInfo.borderColor);
-  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+  if (!g_useGLESPath)
+    glTexParameterfv(TEXTURE_TARGET, GL_TEXTURE_BORDER_COLOR, videoTexInfo.borderColor);
+  const GLint wrapMode = g_useGLESPath ? GL_CLAMP_TO_EDGE : GL_CLAMP_TO_BORDER;
+  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_S, wrapMode);
+  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_T, wrapMode);
   glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_MIN_FILTER, filterType);
   glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_MAG_FILTER, filterType);
   glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
@@ -359,9 +361,11 @@ void UpdateTextureStates()
     glDisable(TEXTURE_TARGET);
   }
 
-  glTexParameterfv(TEXTURE_TARGET, GL_TEXTURE_BORDER_COLOR, videoTexInfo.transColor);
-  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+  if (!g_useGLESPath)
+    glTexParameterfv(TEXTURE_TARGET, GL_TEXTURE_BORDER_COLOR, videoTexInfo.transColor);
+  const GLint wrapMode = g_useGLESPath ? GL_CLAMP_TO_EDGE : GL_CLAMP_TO_BORDER;
+  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_S, wrapMode);
+  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_T, wrapMode);
   glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_MIN_FILTER, filterType);
   glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_MAG_FILTER, filterType);
   glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_DECAL);
