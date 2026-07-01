@@ -97,6 +97,16 @@ static ShaderProgram shaderProgram;
 static constexpr GLubyte transparencyTexture[] = {0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0xFF};
 static GLubyte borderTexture[] = {0x10,0x80,0x80,0x00,0x10,0x80,0x80,0x00,0x10,0x80,0x80,0x00,0x10,0x80,0x80,0x00};
 
+static void LogGLErrors(const char* where)
+{
+  GLenum err = glGetError();
+  while (err != GL_NO_ERROR)
+  {
+    fprintf(stderr, "[video] GL error after %s: 0x%x\n", where, err);
+    err = glGetError();
+  }
+}
+
 static bool BuildSimpleGLESProgram()
 {
   if (g_simpleGLESProgramReady)
@@ -484,10 +494,12 @@ void InitTextures()
   
   glActiveTexture(mainTextureUnit);
   glBindTexture(TEXTURE_TARGET, videoTexInfo.borderTexName);
-  glTexImage2D(TEXTURE_TARGET, 0, mainInternalTextureFormat32, 2, 2, 0, mainExternalTextureFormat32, mainPixelType32, borderTexture);
+  glTexImage2D(TEXTURE_TARGET, 0, mainInternalTextureFormat32, 2, 2, 0, g_useGLESPath ? GL_RGBA : mainExternalTextureFormat32, mainPixelType32, borderTexture);
+  LogGLErrors("InitTextures border");
   glActiveTexture(osdTextureUnit);
   glBindTexture(TEXTURE_TARGET, videoTexInfo.transparencyTexName);
-  glTexImage2D(TEXTURE_TARGET, 0, osdExternalTextureFormat32, 2, 2, 0, osdExternalTextureFormat32, osdPixelType32, transparencyTexture);
+  glTexImage2D(TEXTURE_TARGET, 0, osdExternalTextureFormat32, 2, 2, 0, g_useGLESPath ? GL_RGBA : osdExternalTextureFormat32, osdPixelType32, transparencyTexture);
+  LogGLErrors("InitTextures transparency");
   glActiveTexture(lutTextureUnit);
   glBindTexture(GL_TEXTURE_2D, videoTexInfo.LUTTexName);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, &(LUT16[0][0]));
@@ -873,13 +885,14 @@ render_main_buffer:
     const uint32 pixType = (structMainChannel.dmaflags >> 4) & 0x0F;
     const bool useConvertedMainRGBA = g_useGLESPath;
     const GLint mainInternalTextureFormat = useConvertedMainRGBA ? mainInternalTextureFormat32 : ((pixType == 2) ? mainInternalTextureFormat16 : mainInternalTextureFormat32);
-    const GLint mainExternalTextureFormat = useConvertedMainRGBA ? mainExternalTextureFormat32 : ((pixType == 2) ? mainExternalTextureFormat16 : mainExternalTextureFormat32);
+    const GLint mainExternalTextureFormat = useConvertedMainRGBA ? GL_RGBA : ((pixType == 2) ? mainExternalTextureFormat16 : mainExternalTextureFormat32);
     const GLint mainInternalTextureBPC = useConvertedMainRGBA ? mainInternalTextureBPC32 : ((pixType == 2) ? mainInternalTextureBPC16 : mainInternalTextureBPC32);
     const GLint mainPixelType = useConvertedMainRGBA ? mainPixelType32 : ((pixType == 2) ? mainPixelType16 : mainPixelType32);
     const void* const mainPixels = useConvertedMainRGBA ? (void*)mainChannelBuffer : ((pixType == 4 || pixType == 2) ? pMainChannelBuffer : (void*)mainChannelBuffer);
     if(bMainTexturePixType != pixType) // format change or never created?
     {
       glTexImage2D(TEXTURE_TARGET,0,mainInternalTextureFormat, ALLOCATED_TEXTURE_WIDTH, ALLOCATED_TEXTURE_HEIGHT, 0,mainExternalTextureFormat,mainPixelType, mainPixels);
+      LogGLErrors("main texture init");
       bMainTexturePixType = pixType;
     }
     else
@@ -902,12 +915,14 @@ render_main_buffer:
           MessageBox(NULL,"Failed to map main buffer","glMapBufferRange",MB_OK);
 
         glTexSubImage2D(TEXTURE_TARGET,0,0,0,structMainChannel.src_width,structMainChannel.src_height,mainExternalTextureFormat,mainPixelType, nullptr);
+        LogGLErrors("main texture upload");
 
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
       }
       else
       {
         glTexSubImage2D(TEXTURE_TARGET,0,0,0,structMainChannel.src_width,structMainChannel.src_height,mainExternalTextureFormat,mainPixelType, mainPixels);
+        LogGLErrors("main texture upload (ES)");
       }
     }
 
@@ -924,13 +939,14 @@ render_main_buffer:
     const uint32 pixType = (structOverlayChannel.dmaflags >> 4) & 0x0F;
     const bool useConvertedOverlayRGBA = g_useGLESPath;
     const GLint osdInternalTextureFormat = useConvertedOverlayRGBA ? osdInternalTextureFormat32 : ((pixType == 2) ? osdInternalTextureFormat16 : osdInternalTextureFormat32);
-    const GLint osdExternalTextureFormat = useConvertedOverlayRGBA ? osdExternalTextureFormat32 : ((pixType == 2) ? osdExternalTextureFormat16 : osdExternalTextureFormat32);
+    const GLint osdExternalTextureFormat = useConvertedOverlayRGBA ? GL_RGBA : ((pixType == 2) ? osdExternalTextureFormat16 : osdExternalTextureFormat32);
     const GLint osdInternalTextureBPC = useConvertedOverlayRGBA ? osdInternalTextureBPC32 : ((pixType == 2) ? osdInternalTextureBPC16 : osdInternalTextureBPC32);
     const GLint osdPixelType = useConvertedOverlayRGBA ? osdPixelType32 : ((pixType == 2) ? osdPixelType16 : osdPixelType32);
     const void* const osdPixels = useConvertedOverlayRGBA ? (void*)overlayChannelBuffer : ((pixType == 4 || pixType == 2) ? pOverlayChannelBuffer : (void*)overlayChannelBuffer);
     if(bOverlayTexturePixType != pixType) // format change or never created?
     {
       glTexImage2D(TEXTURE_TARGET,0,osdInternalTextureFormat, ALLOCATED_TEXTURE_WIDTH, ALLOCATED_TEXTURE_HEIGHT, 0,osdExternalTextureFormat, osdPixelType, osdPixels);
+      LogGLErrors("overlay texture init");
       bOverlayTexturePixType = pixType;
     }
     else
@@ -953,12 +969,14 @@ render_main_buffer:
           MessageBox(NULL,"Failed to map osd buffer","glMapBufferRange",MB_OK);
 
         glTexSubImage2D(TEXTURE_TARGET,0,0,0,structOverlayChannel.src_width,structOverlayChannel.src_height,osdExternalTextureFormat,osdPixelType, nullptr);
+        LogGLErrors("overlay texture upload");
 
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
       }
       else
       {
         glTexSubImage2D(TEXTURE_TARGET,0,0,0,structOverlayChannel.src_width,structOverlayChannel.src_height,osdExternalTextureFormat,osdPixelType, osdPixels);
+        LogGLErrors("overlay texture upload (ES)");
       }
     }
 
