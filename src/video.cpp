@@ -646,7 +646,7 @@ void RenderVideo(const int winwidth, const int winheight)
       (uint8 *)(nuonEnv.GetPointerToSystemMemory((uint32)structMainChannel.base + (((structMainChannel.src_yoff * structMainChannel.src_width) + structMainChannel.src_xoff) << pixWidthShift)));
 
     pMainChannelBuffer = ptrNuonFrameBuffer;
-    if (pixType == 4 || pixType == 2) // pixel shader does the color conversion?
+    if (!g_useGLESPath && (pixType == 4 || pixType == 2)) // original shader path expects raw YCrCb/16-bit data
     {
       goto process_overlay_buffer;
     }
@@ -761,7 +761,7 @@ process_overlay_buffer:
     }
 
     pOverlayChannelBuffer = ptrNuonFrameBuffer;
-    if (pixType == 4 || pixType == 2) // pixel shader does the color conversion ?
+    if (!g_useGLESPath && (pixType == 4 || pixType == 2)) // original shader path expects raw YCrCb/16-bit data
     {
       goto render_main_buffer;
     }
@@ -871,12 +871,12 @@ render_main_buffer:
     glBindTexture(TEXTURE_TARGET,videoTexInfo.mainTexName);
 
     const uint32 pixType = (structMainChannel.dmaflags >> 4) & 0x0F;
-    const GLint mainInternalTextureFormat = (pixType == 2) ? mainInternalTextureFormat16 : mainInternalTextureFormat32;
-    const GLint mainExternalTextureFormat = (pixType == 2) ? mainExternalTextureFormat16 : mainExternalTextureFormat32;
-    const GLint mainInternalTextureBPC = (pixType == 2) ? mainInternalTextureBPC16 : mainInternalTextureBPC32;
-    const GLint mainPixelType = (pixType == 2) ? mainPixelType16 : mainPixelType32;
-    const void* const mainPixels = (pixType == 4 || pixType == 2) // pixel shader does color conversion?
-        ? pMainChannelBuffer : (void*)mainChannelBuffer;
+    const bool useConvertedMainRGBA = g_useGLESPath;
+    const GLint mainInternalTextureFormat = useConvertedMainRGBA ? mainInternalTextureFormat32 : ((pixType == 2) ? mainInternalTextureFormat16 : mainInternalTextureFormat32);
+    const GLint mainExternalTextureFormat = useConvertedMainRGBA ? mainExternalTextureFormat32 : ((pixType == 2) ? mainExternalTextureFormat16 : mainExternalTextureFormat32);
+    const GLint mainInternalTextureBPC = useConvertedMainRGBA ? mainInternalTextureBPC32 : ((pixType == 2) ? mainInternalTextureBPC16 : mainInternalTextureBPC32);
+    const GLint mainPixelType = useConvertedMainRGBA ? mainPixelType32 : ((pixType == 2) ? mainPixelType16 : mainPixelType32);
+    const void* const mainPixels = useConvertedMainRGBA ? (void*)mainChannelBuffer : ((pixType == 4 || pixType == 2) ? pMainChannelBuffer : (void*)mainChannelBuffer);
     if(bMainTexturePixType != pixType) // format change or never created?
     {
       glTexImage2D(TEXTURE_TARGET,0,mainInternalTextureFormat, ALLOCATED_TEXTURE_WIDTH, ALLOCATED_TEXTURE_HEIGHT, 0,mainExternalTextureFormat,mainPixelType, mainPixels);
@@ -919,12 +919,12 @@ render_main_buffer:
     glBindTexture(TEXTURE_TARGET,videoTexInfo.osdTexName);
 
     const uint32 pixType = (structOverlayChannel.dmaflags >> 4) & 0x0F;
-    const GLint osdInternalTextureFormat = (pixType == 2) ? osdInternalTextureFormat16 : osdInternalTextureFormat32;
-    const GLint osdExternalTextureFormat = (pixType == 2) ? osdExternalTextureFormat16 : osdExternalTextureFormat32;
-    const GLint osdInternalTextureBPC = (pixType == 2) ? osdInternalTextureBPC16 : osdInternalTextureBPC32;
-    const GLint osdPixelType = (pixType == 2) ? osdPixelType16 : osdPixelType32;
-    const void* const osdPixels = (pixType == 4 || pixType == 2) // pixel shader does color conversion?
-        ? pOverlayChannelBuffer : (void*)overlayChannelBuffer;
+    const bool useConvertedOverlayRGBA = g_useGLESPath;
+    const GLint osdInternalTextureFormat = useConvertedOverlayRGBA ? osdInternalTextureFormat32 : ((pixType == 2) ? osdInternalTextureFormat16 : osdInternalTextureFormat32);
+    const GLint osdExternalTextureFormat = useConvertedOverlayRGBA ? osdExternalTextureFormat32 : ((pixType == 2) ? osdExternalTextureFormat16 : osdExternalTextureFormat32);
+    const GLint osdInternalTextureBPC = useConvertedOverlayRGBA ? osdInternalTextureBPC32 : ((pixType == 2) ? osdInternalTextureBPC16 : osdInternalTextureBPC32);
+    const GLint osdPixelType = useConvertedOverlayRGBA ? osdPixelType32 : ((pixType == 2) ? osdPixelType16 : osdPixelType32);
+    const void* const osdPixels = useConvertedOverlayRGBA ? (void*)overlayChannelBuffer : ((pixType == 4 || pixType == 2) ? pOverlayChannelBuffer : (void*)overlayChannelBuffer);
     if(bOverlayTexturePixType != pixType) // format change or never created?
     {
       glTexImage2D(TEXTURE_TARGET,0,osdInternalTextureFormat, ALLOCATED_TEXTURE_WIDTH, ALLOCATED_TEXTURE_HEIGHT, 0,osdExternalTextureFormat, osdPixelType, osdPixels);
