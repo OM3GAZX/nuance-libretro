@@ -884,28 +884,31 @@ render_main_buffer:
     }
     else
     {
-#if 1
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, videoTexInfo.mainTexPBO);
-
       glPixelStorei(GL_PACK_ALIGNMENT, 1);
       glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-      glBufferData(GL_PIXEL_UNPACK_BUFFER, structMainChannel.src_width * structMainChannel.src_height * mainInternalTextureBPC, nullptr, GL_STREAM_DRAW);
-      GLubyte* const ptr = (GLubyte*)glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, structMainChannel.src_width * structMainChannel.src_height * mainInternalTextureBPC, GL_MAP_WRITE_BIT);
-      if (ptr)
+      if (!g_useGLESPath)
       {
-        memcpy(ptr, mainPixels, structMainChannel.src_width * structMainChannel.src_height * mainInternalTextureBPC);
-        glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, videoTexInfo.mainTexPBO);
+
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, structMainChannel.src_width * structMainChannel.src_height * mainInternalTextureBPC, nullptr, GL_STREAM_DRAW);
+        GLubyte* const ptr = (GLubyte*)glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, structMainChannel.src_width * structMainChannel.src_height * mainInternalTextureBPC, GL_MAP_WRITE_BIT);
+        if (ptr)
+        {
+          memcpy(ptr, mainPixels, structMainChannel.src_width * structMainChannel.src_height * mainInternalTextureBPC);
+          glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+        }
+        else
+          MessageBox(NULL,"Failed to map main buffer","glMapBufferRange",MB_OK);
+
+        glTexSubImage2D(TEXTURE_TARGET,0,0,0,structMainChannel.src_width,structMainChannel.src_height,mainExternalTextureFormat,mainPixelType, nullptr);
+
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
       }
       else
-        MessageBox(NULL,"Failed to map main buffer","glMapBufferRange",MB_OK);
-
-      glTexSubImage2D(TEXTURE_TARGET,0,0,0,structMainChannel.src_width,structMainChannel.src_height,mainExternalTextureFormat,mainPixelType, nullptr);
-
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-#else
-      glTexSubImage2D(TEXTURE_TARGET,0,0,0,structMainChannel.src_width,structMainChannel.src_height,mainExternalTextureFormat,mainPixelType, mainPixels);
-#endif
+      {
+        glTexSubImage2D(TEXTURE_TARGET,0,0,0,structMainChannel.src_width,structMainChannel.src_height,mainExternalTextureFormat,mainPixelType, mainPixels);
+      }
     }
 
     if(bUseSeparateThread) gfx_lock.unlock();
@@ -932,28 +935,31 @@ render_main_buffer:
     }
     else
     {
-#if 1
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, videoTexInfo.osdTexPBO);
-
       glPixelStorei(GL_PACK_ALIGNMENT, 1);
       glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-      glBufferData(GL_PIXEL_UNPACK_BUFFER, structOverlayChannel.src_width * structOverlayChannel.src_height * osdInternalTextureBPC, nullptr, GL_STREAM_DRAW);
-      GLubyte* const ptr = (GLubyte*)glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, structOverlayChannel.src_width * structOverlayChannel.src_height * osdInternalTextureBPC, GL_MAP_WRITE_BIT);
-      if (ptr)
+      if (!g_useGLESPath)
       {
-        memcpy(ptr, osdPixels, structOverlayChannel.src_width * structOverlayChannel.src_height * osdInternalTextureBPC);
-        glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, videoTexInfo.osdTexPBO);
+
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, structOverlayChannel.src_width * structOverlayChannel.src_height * osdInternalTextureBPC, nullptr, GL_STREAM_DRAW);
+        GLubyte* const ptr = (GLubyte*)glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, structOverlayChannel.src_width * structOverlayChannel.src_height * osdInternalTextureBPC, GL_MAP_WRITE_BIT);
+        if (ptr)
+        {
+          memcpy(ptr, osdPixels, structOverlayChannel.src_width * structOverlayChannel.src_height * osdInternalTextureBPC);
+          glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+        }
+        else
+          MessageBox(NULL,"Failed to map osd buffer","glMapBufferRange",MB_OK);
+
+        glTexSubImage2D(TEXTURE_TARGET,0,0,0,structOverlayChannel.src_width,structOverlayChannel.src_height,osdExternalTextureFormat,osdPixelType, nullptr);
+
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
       }
       else
-        MessageBox(NULL,"Failed to map osd buffer","glMapBufferRange",MB_OK);
-
-      glTexSubImage2D(TEXTURE_TARGET,0,0,0,structOverlayChannel.src_width,structOverlayChannel.src_height,osdExternalTextureFormat,osdPixelType, nullptr);
-
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-#else
-      glTexSubImage2D(TEXTURE_TARGET,0,0,0,structOverlayChannel.src_width,structOverlayChannel.src_height,osdExternalTextureFormat,osdPixelType, osdPixels);
-#endif
+      {
+        glTexSubImage2D(TEXTURE_TARGET,0,0,0,structOverlayChannel.src_width,structOverlayChannel.src_height,osdExternalTextureFormat,osdPixelType, osdPixels);
+      }
     }
 
     if(bUseSeparateThread) gfx_lock.unlock();
