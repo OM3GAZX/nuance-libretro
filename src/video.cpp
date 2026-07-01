@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <cstring>
 #include <mutex>
+#include <vector>
 #include <GL/glew.h>
 
 #include "GLWindow.h"
@@ -78,6 +79,7 @@ static int bMainTexturePixType = -1;
 static int bOverlayTexturePixType = -1;
 
 static bool bCanDisplayVideo = false;
+static bool g_bootTextureTestShown = false;
 
 #define CHANNELSTATE_OVERLAY_ACTIVE (0x02)
 #define CHANNELSTATE_MAIN_ACTIVE (0x01)
@@ -596,6 +598,75 @@ void VideoInvalidateGLState()
   // leave the shader sampling all-zero) by resetting the cached pixel types.
   bMainTexturePixType = -1;
   bOverlayTexturePixType = -1;
+  g_bootTextureTestShown = false;
+}
+
+static bool RenderBootTextureTest(const int winwidth, const int winheight)
+{
+  if (!g_useGLESPath)
+    return false;
+
+  if (!videoTexInfo.mainTexName)
+    glGenTextures(1, &videoTexInfo.mainTexName);
+
+  std::vector<uint32> testPixels(ALLOCATED_TEXTURE_WIDTH * ALLOCATED_TEXTURE_HEIGHT);
+  for (uint32 y = 0; y < ALLOCATED_TEXTURE_HEIGHT; ++y)
+  {
+    for (uint32 x = 0; x < ALLOCATED_TEXTURE_WIDTH; ++x)
+    {
+      const bool checker = (((x / 32) + (y / 32)) & 1U) != 0U;
+      const uint8 r = checker ? 0xFFu : 0x00u;
+      const uint8 g = checker ? 0x00u : 0xFFu;
+      const uint8 b = (((x + y) / 32) & 1U) != 0U ? 0xFFu : 0x00u;
+      testPixels[y * ALLOCATED_TEXTURE_WIDTH + x] = (0xFFu << 24) | ((uint32)b << 16) | ((uint32)g << 8) | (uint32)r;
+    }
+  }
+
+  glViewport(0, 0, winwidth, winheight);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+
+  glActiveTexture(mainTextureUnit);
+  glBindTexture(TEXTURE_TARGET, videoTexInfo.mainTexName);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexStorage2D(TEXTURE_TARGET, 1, GL_RGBA8, ALLOCATED_TEXTURE_WIDTH, ALLOCATED_TEXTURE_HEIGHT);
+  glTexSubImage2D(TEXTURE_TARGET, 0, 0, 0, ALLOCATED_TEXTURE_WIDTH, ALLOCATED_TEXTURE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, testPixels.data());
+  LogGLErrors("boot texture test upload");
+
+  if (!BuildSimpleGLESProgram())
+  {
+    fprintf(stderr, "[video] boot texture test shader setup failed\n");
+    return false;
+  }
+
+  static const GLfloat quadVertices[] = {
+    -1.0f, -1.0f, 0.0f, 0.0f,
+    -1.0f,  1.0f, 0.0f, 1.0f,
+     1.0f,  1.0f, 1.0f, 1.0f,
+     1.0f, -1.0f, 1.0f, 0.0f,
+  };
+
+  glUseProgram(g_simpleGLESProgram);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(TEXTURE_TARGET, videoTexInfo.mainTexName);
+  glUniform1i(g_simpleGLESUniformLoc, 0);
+  glEnableVertexAttribArray(g_simpleGLESPositionLoc);
+  glEnableVertexAttribArray(g_simpleGLESTexCoordLoc);
+  glVertexAttribPointer(g_simpleGLESPositionLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), quadVertices);
+  glVertexAttribPointer(g_simpleGLESTexCoordLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), quadVertices + 2);
+  glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+  glDisableVertexAttribArray(g_simpleGLESPositionLoc);
+  glDisableVertexAttribArray(g_simpleGLESTexCoordLoc);
+#ifdef _WIN32
+  SwapBuffers(display.hDC);
+#endif
+  g_bootTextureTestShown = true;
+  fprintf(stderr, "[video] boot texture test displayed\n");
+  return true;
 }
 
 void RenderVideo(const int winwidth, const int winheight)
@@ -604,6 +675,12 @@ void RenderVideo(const int winwidth, const int winheight)
   g_useGLESPath = glVersion && strstr(glVersion, "OpenGL ES") != nullptr;
   if (g_useGLESPath)
     fprintf(stderr, "[video] using GLES-compatible texture path\n");
+
+  if (!g_bootTextureTestShown && !bTexturesInitialized)
+  {
+    if (RenderBootTextureTest(winwidth, winheight))
+      return;
+  }
 
   if(!bCanDisplayVideo)
   {
