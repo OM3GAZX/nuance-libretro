@@ -193,6 +193,48 @@ static void context_destroy(void)
     VideoInvalidateGLState();
 }
 
+static bool RequestHwRenderContext()
+{
+    hw_render.context_reset = context_reset;
+    hw_render.context_destroy = context_destroy;
+    hw_render.depth = false;
+    hw_render.stencil = false;
+    hw_render.bottom_left_origin = true;
+    hw_render.cache_context = true;
+
+    // Prefer regular OpenGL on desktop platforms, but fall back to OpenGL ES on
+    // mobile/embedded targets such as Raspberry Pi/RetroPie where RetroArch is
+    // built against GLES.
+    static const struct {
+        int type;
+        int major;
+        int minor;
+        const char* name;
+    } contexts[] = {
+#if defined(__ANDROID__) || defined(__arm__) || defined(__aarch64__) || defined(_M_ARM) || defined(_M_ARM64)
+        { RETRO_HW_CONTEXT_OPENGLES3, 3, 1, "OpenGL ES 3.1" },
+        { RETRO_HW_CONTEXT_OPENGLES2, 2, 0, "OpenGL ES 2.0" },
+#else
+        { RETRO_HW_CONTEXT_OPENGL, 2, 1, "OpenGL 2.1" },
+        { RETRO_HW_CONTEXT_OPENGLES3, 3, 1, "OpenGL ES 3.1" },
+#endif
+    };
+
+    for (const auto& ctx : contexts) {
+        hw_render.context_type = ctx.type;
+        hw_render.version_major = ctx.major;
+        hw_render.version_minor = ctx.minor;
+        log_printf("libretro: requesting HW render (%s)...\n", ctx.name); fflush(stderr);
+        if (environ_cb(RETRO_ENVIRONMENT_SET_HW_RENDER, &hw_render)) {
+            log_printf("libretro: HW render OK (%s)\n", ctx.name); fflush(stderr);
+            return true;
+        }
+    }
+
+    log_printf("libretro: HW render not available, using software\n"); fflush(stderr);
+    return false;
+}
+
 // --- Libretro API ---
 
 void retro_set_environment(retro_environment_t cb)
@@ -332,22 +374,10 @@ bool retro_load_game(const struct retro_game_info *game)
 
     // Defer CPU init to context_reset to avoid potential issues
 
-    // Request OpenGL context
-    hw_render.context_type = RETRO_HW_CONTEXT_OPENGL;
-    hw_render.context_reset = context_reset;
-    hw_render.context_destroy = context_destroy;
-    hw_render.depth = false;
-    hw_render.stencil = false;
-    hw_render.bottom_left_origin = true;
-    hw_render.version_major = 2;
-    hw_render.version_minor = 1;
-    hw_render.cache_context = true;
-
-    log_printf("libretro: requesting HW render...\n"); fflush(stderr);
-    if (!environ_cb(RETRO_ENVIRONMENT_SET_HW_RENDER, &hw_render)) {
-        log_printf("libretro: HW render not available, using software\n"); fflush(stderr);
-    } else {
-        log_printf("libretro: HW render OK\n"); fflush(stderr);
+    // Request a hardware render context compatible with desktop OpenGL and
+    // embedded OpenGL ES builds.
+    if (!RequestHwRenderContext()) {
+        log_printf("libretro: falling back to software video path\n"); fflush(stderr);
     }
 
     // Find game file
