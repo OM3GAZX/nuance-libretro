@@ -363,7 +363,6 @@ void UpdateTextureStates()
 
   if (!g_useGLESPath)
     glTexParameterfv(TEXTURE_TARGET, GL_TEXTURE_BORDER_COLOR, videoTexInfo.transColor);
-  const GLint wrapMode = g_useGLESPath ? GL_CLAMP_TO_EDGE : GL_CLAMP_TO_BORDER;
   glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_S, wrapMode);
   glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_WRAP_T, wrapMode);
   glTexParameteri(TEXTURE_TARGET, GL_TEXTURE_MIN_FILTER, filterType);
