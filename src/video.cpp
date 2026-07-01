@@ -115,28 +115,44 @@ void UpdateTextureStates()
 
   if(!bShadersInstalled)
   {
-    shaderProgram.Initialize();
-    shaderProgram.InstallShaderSourceFromFile("video_generic.vs",GL_VERTEX_SHADER);
-    shaderProgram.InstallShaderSourceFromFile(nuonEnv.bUseCRTshader ? "video_m32_o32_crt.fs" : "video_m32_o32.fs",GL_FRAGMENT_SHADER);
-    shaderProgram.AttachShader(GL_VERTEX_SHADER);
-    shaderProgram.AttachShader(GL_FRAGMENT_SHADER);
-    bool status = shaderProgram.CompileAndLinkShaders();
-    if(status)
-    {
-      status = shaderProgram.StartShaderProgram();
-      if(status)
+    const char* fragmentShaderName = nuonEnv.bUseCRTshader ? "video_m32_o32_crt.fs" : "video_m32_o32.fs";
+    bool status = false;
+
+    auto tryInstallShaders = [&](const char* fragShader) -> bool {
+      shaderProgram.Initialize();
+      shaderProgram.InstallShaderSourceFromFile("video_generic.vs",GL_VERTEX_SHADER);
+      shaderProgram.InstallShaderSourceFromFile(fragShader,GL_FRAGMENT_SHADER);
+      shaderProgram.AttachShader(GL_VERTEX_SHADER);
+      shaderProgram.AttachShader(GL_FRAGMENT_SHADER);
+      bool ok = shaderProgram.CompileAndLinkShaders();
+      if(ok)
       {
-        uniformLoc = glGetUniformLocation(shaderProgram.GetProgramObject(),"mainChannelSampler");
-        glUniform1i(uniformLoc, mainTextureUnit-GL_TEXTURE0);
-        uniformLoc = glGetUniformLocation(shaderProgram.GetProgramObject(),"overlayChannelSampler");
-        glUniform1i(uniformLoc, osdTextureUnit-GL_TEXTURE0);
-        uniformLoc = glGetUniformLocation(shaderProgram.GetProgramObject(),"LUTSampler");
-        glUniform1i(uniformLoc, lutTextureUnit-GL_TEXTURE0);
-        bShadersInstalled = true;
+        ok = shaderProgram.StartShaderProgram();
+        if(ok)
+        {
+          uniformLoc = glGetUniformLocation(shaderProgram.GetProgramObject(),"mainChannelSampler");
+          glUniform1i(uniformLoc, mainTextureUnit-GL_TEXTURE0);
+          uniformLoc = glGetUniformLocation(shaderProgram.GetProgramObject(),"overlayChannelSampler");
+          glUniform1i(uniformLoc, osdTextureUnit-GL_TEXTURE0);
+          uniformLoc = glGetUniformLocation(shaderProgram.GetProgramObject(),"LUTSampler");
+          glUniform1i(uniformLoc, lutTextureUnit-GL_TEXTURE0);
+          return true;
+        }
       }
-    }
-    if(!bShadersInstalled)
       shaderProgram.Uninitalize();
+      return false;
+    };
+
+    status = tryInstallShaders(fragmentShaderName);
+    if(!status && nuonEnv.bUseCRTshader)
+    {
+      fprintf(stderr, "[video] CRT shader failed, falling back to standard shader\n");
+      fflush(stderr);
+      status = tryInstallShaders("video_m32_o32.fs");
+    }
+
+    if(status)
+      bShadersInstalled = true;
   }
 
   // Only push uniforms if a valid program is bound. If shader install failed
