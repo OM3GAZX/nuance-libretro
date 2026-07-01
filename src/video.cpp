@@ -97,6 +97,41 @@ static ShaderProgram shaderProgram;
 static constexpr GLubyte transparencyTexture[] = {0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0xFF};
 static GLubyte borderTexture[] = {0x10,0x80,0x80,0x00,0x10,0x80,0x80,0x00,0x10,0x80,0x80,0x00,0x10,0x80,0x80,0x00};
 
+static inline uint8 ClampToByte(float value)
+{
+  if (value < 0.0f)
+    return 0;
+  if (value > 255.0f)
+    return 255;
+  return (uint8)(value + 0.5f);
+}
+
+static inline float ClampToUnit(float value)
+{
+  if (value < 0.0f)
+    return 0.0f;
+  if (value > 1.0f)
+    return 1.0f;
+  return value;
+}
+
+static inline uint32 ConvertYCbCrAToRGBA(uint8 y, uint8 cr, uint8 cb, uint8 alpha)
+{
+  const float yNorm = (float)y / 255.0f;
+  const float cbNorm = (float)cb / 255.0f;
+  const float crNorm = (float)cr / 255.0f;
+
+  const float yExpanded = ClampToUnit(yNorm * (255.0f / 219.0f) - (16.0f / 219.0f));
+  const float cbExpanded = ClampToUnit(cbNorm * (255.0f / 224.0f) - (16.0f / 224.0f)) - 0.5f;
+  const float crExpanded = ClampToUnit(crNorm * (255.0f / 224.0f) - (16.0f / 224.0f)) - 0.5f;
+
+  const float red = ClampToUnit(yExpanded + 1.402f * crExpanded);
+  const float green = ClampToUnit(yExpanded - 0.34413f * cbExpanded - 0.714136f * crExpanded);
+  const float blue = ClampToUnit(yExpanded + 1.772f * cbExpanded);
+
+  return ((uint32)alpha << 24) | ((uint32)ClampToByte(blue * 255.0f) << 16) | ((uint32)ClampToByte(green * 255.0f) << 8) | (uint32)ClampToByte(red * 255.0f);
+}
+
 static void LogGLErrors(const char* where)
 {
   GLenum err = glGetError();
@@ -681,7 +716,15 @@ void RenderVideo(const int winwidth, const int winheight)
           case 5:
             //16 or 16+16Z
             //Alpha for main channel is opaque
-            *ptrMainDisplayBuffer = (0xFFu << 24) | LUT16[ptrNuonFrameBuffer[0]][ptrNuonFrameBuffer[1]];
+            if (g_useGLESPath)
+            {
+              const uint32 lutValue = LUT16[ptrNuonFrameBuffer[0]][ptrNuonFrameBuffer[1]];
+              *ptrMainDisplayBuffer = ConvertYCbCrAToRGBA((uint8)(lutValue & 0xFF), (uint8)((lutValue >> 8) & 0xFF), (uint8)((lutValue >> 16) & 0xFF), 0xFF);
+            }
+            else
+            {
+              *ptrMainDisplayBuffer = (0xFFu << 24) | LUT16[ptrNuonFrameBuffer[0]][ptrNuonFrameBuffer[1]];
+            }
             break;
           case 4:
           case 6:
@@ -691,7 +734,7 @@ void RenderVideo(const int winwidth, const int winheight)
             const uint8 CR = ptrNuonFrameBuffer[1];
             const uint8 CB = ptrNuonFrameBuffer[2];
             //Alpha for main channel is opaque
-            *ptrMainDisplayBuffer = (0xFFu << 24) | ((uint32)CB << 16) | ((uint32)CR << 8) | (uint32)Y;
+            *ptrMainDisplayBuffer = g_useGLESPath ? ConvertYCbCrAToRGBA(Y, CR, CB, 0xFF) : ((0xFFu << 24) | ((uint32)CB << 16) | ((uint32)CR << 8) | (uint32)Y);
             break;
         }
 
@@ -849,11 +892,19 @@ process_overlay_buffer:
             break;
         }
 
-        uint32 pixel = ((uint32)CB << 16) | ((uint32)CR << 8) | (uint32)Y;
-        //Color (0,0,0) is always transparent per Nuon architecture document
-        if(pixel)
+        uint32 pixel = 0;
+        if (g_useGLESPath)
         {
-          pixel |= (0xFFu - (uint32)A) << 24;
+          pixel = ConvertYCbCrAToRGBA(Y, CR, CB, (pixel != 0) ? (uint8)(0xFFu - (uint32)A) : 0);
+        }
+        else
+        {
+          pixel = ((uint32)CB << 16) | ((uint32)CR << 8) | (uint32)Y;
+          //Color (0,0,0) is always transparent per Nuon architecture document
+          if(pixel)
+          {
+            pixel |= (0xFFu - (uint32)A) << 24;
+          }
         }
 
         *ptrMainDisplayBuffer = pixel;
@@ -861,11 +912,18 @@ process_overlay_buffer:
 
         if(pixType == 1)
         {
-          pixel = ((uint32)CB2 << 16) | ((uint32)CR2 << 8) | (uint32)Y2;
-          //Color (0,0,0) is always transparent per Nuon architecture document
-          if(pixel)
+          if (g_useGLESPath)
           {
-            pixel |= (0xFFu - (uint32)A2) << 24;
+            pixel = ConvertYCbCrAToRGBA(Y2, CR2, CB2, (pixel != 0) ? (uint8)(0xFFu - (uint32)A2) : 0);
+          }
+          else
+          {
+            pixel = ((uint32)CB2 << 16) | ((uint32)CR2 << 8) | (uint32)Y2;
+            //Color (0,0,0) is always transparent per Nuon architecture document
+            if(pixel)
+            {
+              pixel |= (0xFFu - (uint32)A2) << 24;
+            }
           }
 
           *ptrMainDisplayBuffer = pixel;
