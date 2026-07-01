@@ -87,21 +87,13 @@ static int16_t audio_buffer[AUDIO_BUFFER_SIZE];
 // Software framebuffer fallback
 #define FB_WIDTH 720
 #define FB_HEIGHT 480
-static uint8_t framebuffer[FB_WIDTH * FB_HEIGHT * 4];
+static uint32_t framebuffer[FB_WIDTH * FB_HEIGHT];
 
-static void FillSoftwareFramebuffer(const uint32_t* src_pixels, uint8_t* dst_bytes, int width, int height)
+static void FillSoftwareFramebuffer(const uint32_t* src_pixels, uint32_t* dst_pixels, int width, int height)
 {
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            const uint32_t pixel = src_pixels[y * width + x];
-            uint8_t* out = dst_bytes + ((y * width + x) * 4);
-            // RetroArch's software video callback expects a little-endian XRGB8888
-            // byte stream. The 32-bit value produced by the converter is laid out
-            // as 0x00RRGGBB, so the bytes in memory should be B, G, R, X.
-            out[0] = static_cast<uint8_t>(pixel & 0xFF);        // B
-            out[1] = static_cast<uint8_t>((pixel >> 8) & 0xFF); // G
-            out[2] = static_cast<uint8_t>((pixel >> 16) & 0xFF); // R
-            out[3] = 0xFF;                                      // opaque
+            dst_pixels[y * width + x] = src_pixels[y * width + x];
         }
     }
 }
@@ -631,7 +623,7 @@ void retro_run(void)
     uint32_t software_pixels[FB_WIDTH * FB_HEIGHT];
     RenderVideoToSoftwareBuffer(software_pixels, FB_WIDTH, FB_HEIGHT);
     FillSoftwareFramebuffer(software_pixels, framebuffer, FB_WIDTH, FB_HEIGHT);
-    video_cb(framebuffer, FB_WIDTH, FB_HEIGHT, FB_WIDTH * 4);
+    video_cb(framebuffer, FB_WIDTH, FB_HEIGHT, FB_WIDTH * sizeof(uint32_t));
 
     // Audio: drain the host audio ring. DrainAudioRing emits native-endian s16
     // (the ring holds little-endian samples; swapped only on big-endian hosts),

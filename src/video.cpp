@@ -128,6 +128,59 @@ static uint32_t ConvertRawBGRA32ToRGBX(const uint8_t* pixelPtr)
          (uint32_t)pixelPtr[0];
 }
 
+static uint32_t BlendSoftwarePixel(uint32_t base, uint32_t overlay, uint8_t overlayTransparency)
+{
+  if (overlayTransparency <= 0)
+    return overlay;
+  if (overlayTransparency >= 255)
+    return base;
+
+  const uint32_t opacity = 255u - overlayTransparency;
+  const uint32_t r = (((base >> 16) & 0xFFu) * (255u - opacity) + ((overlay >> 16) & 0xFFu) * opacity) / 255u;
+  const uint32_t g = (((base >> 8) & 0xFFu) * (255u - opacity) + ((overlay >> 8) & 0xFFu) * opacity) / 255u;
+  const uint32_t b = ((base & 0xFFu) * (255u - opacity) + (overlay & 0xFFu) * opacity) / 255u;
+  return 0xFF000000u | (r << 16) | (g << 8) | b;
+}
+
+static uint32_t DecodeSoftwarePixel(const uint8_t* pixelPtr, uint32_t pixType, uint8_t defaultAlpha, uint8_t* outAlpha)
+{
+  switch (pixType)
+  {
+    case 2:
+    case 5:
+    {
+      const uint8 Y = pixelPtr[0] & 0xFC;
+      const uint8 CR = (pixelPtr[0] << 6) | ((pixelPtr[1] >> 2) & 0x38);
+      const uint8 CB = pixelPtr[1] << 3;
+      if (outAlpha) *outAlpha = static_cast<uint8_t>(255u - defaultAlpha);
+      return ConvertYCrCbToRGBX(Y, CR, CB);
+    }
+    case 3:
+    {
+      const uint8* clutPtr = (const uint8*)&vdgCLUT[pixelPtr[0]];
+      const uint8 Y = clutPtr[0];
+      const uint8 CR = clutPtr[1];
+      const uint8 CB = clutPtr[2];
+      if (outAlpha) *outAlpha = static_cast<uint8_t>(255u - clutPtr[3]);
+      return ConvertYCrCbToRGBX(Y, CR, CB);
+    }
+    case 4:
+    {
+      if (outAlpha) *outAlpha = static_cast<uint8_t>(255u - pixelPtr[3]);
+      return ConvertRawBGRA32ToRGBX(pixelPtr);
+    }
+    case 6:
+    default:
+    {
+      const uint8 Y = pixelPtr[0];
+      const uint8 CR = pixelPtr[1];
+      const uint8 CB = pixelPtr[2];
+      if (outAlpha) *outAlpha = static_cast<uint8_t>(255u - defaultAlpha);
+      return ConvertYCrCbToRGBX(Y, CR, CB);
+    }
+  }
+}
+
 void RenderVideoToSoftwareBuffer(uint32_t* dst, int width, int height)
 {
   if (!dst || width <= 0 || height <= 0)
@@ -184,49 +237,47 @@ void RenderVideoToSoftwareBuffer(uint32_t* dst, int width, int height)
   const uint32 maxRow = std::min<uint32>(structMainChannel.src_height, (uint32)height);
   uint32_t* out = dst;
 
+  const bool useOverlay = bOverlayChannelActive;
+  const uint32 overlayPixType = useOverlay ? ((structOverlayChannel.dmaflags >> 4) & 0x0F) : 0;
+  uint32 overlayPixWidthShift = 2;
+  uint32 overlayPixWidth = 4;
+  switch (overlayPixType)
+  {
+    case 2:
+      overlayPixWidthShift = 1; overlayPixWidth = 2; break;
+    case 3:
+      overlayPixWidthShift = 0; overlayPixWidth = 1; break;
+    case 4:
+      overlayPixWidthShift = 2; overlayPixWidth = 4; break;
+    case 5:
+      overlayPixWidthShift = 2; overlayPixWidth = 4; break;
+    case 6:
+      overlayPixWidthShift = 3; overlayPixWidth = 8; break;
+    default:
+      overlayPixWidthShift = 2; overlayPixWidth = 4; break;
+  }
+  const uint8* ptrOverlayFrameBuffer = useOverlay
+      ? (const uint8*)(nuonEnv.GetPointerToSystemMemory((uint32)structOverlayChannel.base + (((structOverlayChannel.src_yoff * structOverlayChannel.src_width) + structOverlayChannel.src_xoff) << overlayPixWidthShift)))
+      : nullptr;
+
   static int pixel_dump_count = 0;
   for (uint32 rowCount = 0; rowCount < maxRow; ++rowCount)
   {
     const uint8* rowPtr = ptrNuonFrameBuffer + (rowCount * structMainChannel.src_width * pixWidth);
+    const uint8* overlayRowPtr = useOverlay ? (ptrOverlayFrameBuffer + (rowCount * structOverlayChannel.src_width * overlayPixWidth)) : nullptr;
     for (uint32 colCount = 0; colCount < maxCol; ++colCount)
     {
       const uint8* pixelPtr = rowPtr + (colCount * pixWidth);
+      const uint8* overlayPixelPtr = useOverlay ? (overlayRowPtr + (colCount * overlayPixWidth)) : nullptr;
       uint32_t pixel = 0xFF000000u;
+      uint8_t alpha = 0;
 
-      switch (pixType)
+      pixel = DecodeSoftwarePixel(pixelPtr, pixType, 0xFF, &alpha);
+      if (useOverlay && overlayPixelPtr)
       {
-        case 2:
-        case 5:
-        {
-          const uint8 Y = pixelPtr[0] & 0xFC;
-          const uint8 CR = (pixelPtr[0] << 6) | ((pixelPtr[1] >> 2) & 0x38);
-          const uint8 CB = pixelPtr[1] << 3;
-          pixel = ConvertYCrCbToRGBX(Y, CR, CB);
-          break;
-        }
-        case 3:
-        {
-          const uint8* clutPtr = (const uint8*)&vdgCLUT[pixelPtr[0]];
-          const uint8 Y = clutPtr[0];
-          const uint8 CR = clutPtr[1];
-          const uint8 CB = clutPtr[2];
-          pixel = ConvertYCrCbToRGBX(Y, CR, CB);
-          break;
-        }
-        case 4:
-        {
-          pixel = ConvertRawBGRA32ToRGBX(pixelPtr);
-          break;
-        }
-        case 6:
-        default:
-        {
-          const uint8 Y = pixelPtr[0];
-          const uint8 CR = pixelPtr[1];
-          const uint8 CB = pixelPtr[2];
-          pixel = ConvertYCrCbToRGBX(Y, CR, CB);
-          break;
-        }
+        uint8_t overlayAlpha = 0;
+        const uint32_t overlayPixel = DecodeSoftwarePixel(overlayPixelPtr, overlayPixType, structOverlayChannel.alpha, &overlayAlpha);
+        pixel = BlendSoftwarePixel(pixel, overlayPixel, overlayAlpha);
       }
 
       *out++ = pixel;
