@@ -89,6 +89,20 @@ static int16_t audio_buffer[AUDIO_BUFFER_SIZE];
 #define FB_HEIGHT 480
 static uint8_t framebuffer[FB_WIDTH * FB_HEIGHT * 4];
 
+static void FillSoftwareFramebuffer(const uint32_t* src_pixels, uint8_t* dst_bytes, int width, int height)
+{
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const uint32_t pixel = src_pixels[y * width + x];
+            uint8_t* out = dst_bytes + ((y * width + x) * 4);
+            out[0] = static_cast<uint8_t>(pixel & 0xFF);        // B
+            out[1] = static_cast<uint8_t>((pixel >> 8) & 0xFF); // G
+            out[2] = static_cast<uint8_t>((pixel >> 16) & 0xFF); // R
+            out[3] = 0xFF;                                    // A
+        }
+    }
+}
+
 static void log_printf(const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -611,7 +625,9 @@ void retro_run(void)
         nuonEnv.TriggerScheduledInterrupts();
     }
 
-    RenderVideoToSoftwareBuffer(reinterpret_cast<uint32_t*>(framebuffer), FB_WIDTH, FB_HEIGHT);
+    uint32_t software_pixels[FB_WIDTH * FB_HEIGHT];
+    RenderVideoToSoftwareBuffer(software_pixels, FB_WIDTH, FB_HEIGHT);
+    FillSoftwareFramebuffer(software_pixels, framebuffer, FB_WIDTH, FB_HEIGHT);
     video_cb(framebuffer, FB_WIDTH, FB_HEIGHT, FB_WIDTH * 4);
 
     // Audio: drain the host audio ring. DrainAudioRing emits native-endian s16
