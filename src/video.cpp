@@ -1,6 +1,7 @@
 #include "basetypes.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <cstring>
 #include <mutex>
 #include <GL/glew.h>
 
@@ -63,6 +64,12 @@ constexpr GLint lutTextureUnit = GL_TEXTURE3;
 static bool bTexturesInitialized = false;
 static bool bShadersInstalled = false;
 static bool bSetupViewport = false;
+static bool g_useGLESPath = false;
+static bool g_simpleGLESProgramReady = false;
+static GLuint g_simpleGLESProgram = 0;
+static GLint g_simpleGLESPositionLoc = -1;
+static GLint g_simpleGLESTexCoordLoc = -1;
+static GLint g_simpleGLESUniformLoc = -1;
 
 static uint32 mainChannelBuffer[ALLOCATED_TEXTURE_WIDTH*ALLOCATED_TEXTURE_HEIGHT];
 static uint32 overlayChannelBuffer[ALLOCATED_TEXTURE_WIDTH*ALLOCATED_TEXTURE_HEIGHT];
@@ -89,6 +96,91 @@ static ShaderProgram shaderProgram;
 
 static constexpr GLubyte transparencyTexture[] = {0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0xFF,0x00,0x00,0x00,0xFF};
 static GLubyte borderTexture[] = {0x10,0x80,0x80,0x00,0x10,0x80,0x80,0x00,0x10,0x80,0x80,0x00,0x10,0x80,0x80,0x00};
+
+static bool BuildSimpleGLESProgram()
+{
+  if (g_simpleGLESProgramReady)
+    return g_simpleGLESProgram != 0;
+
+  const GLchar* vertexSource =
+#if defined(GL_ES_VERSION_3_0) || defined(GL_ES_VERSION_2_0)
+    "#version 300 es\n"
+    "precision mediump float;\n"
+    "in vec2 aPosition;\n"
+    "in vec2 aTexCoord;\n"
+    "out vec2 vTexCoord;\n"
+    "void main() { vTexCoord = aTexCoord; gl_Position = vec4(aPosition, 0.0, 1.0); }\n";
+#else
+    "attribute vec2 aPosition;\n"
+    "attribute vec2 aTexCoord;\n"
+    "varying vec2 vTexCoord;\n"
+    "void main() { vTexCoord = aTexCoord; gl_Position = vec4(aPosition, 0.0, 1.0); }\n";
+#endif
+
+  const GLchar* fragmentSource =
+#if defined(GL_ES_VERSION_3_0) || defined(GL_ES_VERSION_2_0)
+    "#version 300 es\n"
+    "precision mediump float;\n"
+    "in vec2 vTexCoord;\n"
+    "uniform sampler2D uTexture;\n"
+    "out vec4 fragColor;\n"
+    "void main() { fragColor = texture(uTexture, vTexCoord); }\n";
+#else
+    "varying vec2 vTexCoord;\n"
+    "uniform sampler2D uTexture;\n"
+    "void main() { gl_FragColor = texture2D(uTexture, vTexCoord); }\n";
+#endif
+
+  const GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+  const GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+  if (!vertexShader || !fragmentShader)
+    return false;
+
+  glShaderSource(vertexShader, 1, &vertexSource, nullptr);
+  glShaderSource(fragmentShader, 1, &fragmentSource, nullptr);
+  glCompileShader(vertexShader);
+  glCompileShader(fragmentShader);
+
+  GLint ok = GL_FALSE;
+  glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &ok);
+  if (!ok) {
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+    return false;
+  }
+  glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &ok);
+  if (!ok) {
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+    return false;
+  }
+
+  g_simpleGLESProgram = glCreateProgram();
+  if (!g_simpleGLESProgram) {
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+    return false;
+  }
+
+  glAttachShader(g_simpleGLESProgram, vertexShader);
+  glAttachShader(g_simpleGLESProgram, fragmentShader);
+  glLinkProgram(g_simpleGLESProgram);
+  glDeleteShader(vertexShader);
+  glDeleteShader(fragmentShader);
+
+  glGetProgramiv(g_simpleGLESProgram, GL_LINK_STATUS, &ok);
+  if (!ok) {
+    glDeleteProgram(g_simpleGLESProgram);
+    g_simpleGLESProgram = 0;
+    return false;
+  }
+
+  g_simpleGLESPositionLoc = glGetAttribLocation(g_simpleGLESProgram, "aPosition");
+  g_simpleGLESTexCoordLoc = glGetAttribLocation(g_simpleGLESProgram, "aTexCoord");
+  g_simpleGLESUniformLoc = glGetUniformLocation(g_simpleGLESProgram, "uTexture");
+  g_simpleGLESProgramReady = true;
+  return true;
+}
 
 void InitializeColorSpaceTables()
 {
@@ -440,6 +532,11 @@ void VideoInvalidateGLState()
 
 void RenderVideo(const int winwidth, const int winheight)
 {
+  const char* glVersion = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+  g_useGLESPath = glVersion && strstr(glVersion, "OpenGL ES") != nullptr;
+  if (g_useGLESPath)
+    fprintf(stderr, "[video] using GLES-compatible texture path\n");
+
   if(!bCanDisplayVideo)
   {
     // No rendered frame yet - so clear the back buffer to black and present so
@@ -866,6 +963,43 @@ render_main_buffer:
   {
     UpdateDisplayList();
     videoTexInfo.bUpdateDisplayList = false;
+  }
+
+  if (g_useGLESPath)
+  {
+    if (!BuildSimpleGLESProgram())
+    {
+      glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+      glClear(GL_COLOR_BUFFER_BIT);
+#ifdef _WIN32
+      SwapBuffers(display.hDC);
+#endif
+      return;
+    }
+
+    static const GLfloat quadVertices[] = {
+      -1.0f, -1.0f, 0.0f, 0.0f,
+      -1.0f,  1.0f, 0.0f, 1.0f,
+       1.0f,  1.0f, 1.0f, 1.0f,
+       1.0f, -1.0f, 1.0f, 0.0f,
+    };
+
+    glUseProgram(g_simpleGLESProgram);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(TEXTURE_TARGET, videoTexInfo.mainTexName);
+    glUniform1i(g_simpleGLESUniformLoc, 0);
+
+    glEnableVertexAttribArray(g_simpleGLESPositionLoc);
+    glEnableVertexAttribArray(g_simpleGLESTexCoordLoc);
+    glVertexAttribPointer(g_simpleGLESPositionLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), quadVertices);
+    glVertexAttribPointer(g_simpleGLESTexCoordLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), quadVertices + 2);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    glDisableVertexAttribArray(g_simpleGLESPositionLoc);
+    glDisableVertexAttribArray(g_simpleGLESTexCoordLoc);
+#ifdef _WIN32
+    SwapBuffers(display.hDC);
+#endif
+    return;
   }
 
   const uint32 activeChannels = (bOverlayChannelActive ? CHANNELSTATE_OVERLAY_ACTIVE: 0) | (bMainChannelActive ? CHANNELSTATE_MAIN_ACTIVE : 0);
